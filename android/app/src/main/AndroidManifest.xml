@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <application android:label="ROI Viewer" android:theme="@style/AppTheme" android:icon="@android:drawable/ic_menu_view"
+        android:allowBackup="false" android:usesCleartextTraffic="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:hardwareAccelerated="true" android:enableOnBackInvokedCallback="false">
+        <activity android:name=".MainActivity" android:exported="true"
+            android:screenOrientation="landscape" android:resizeableActivity="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

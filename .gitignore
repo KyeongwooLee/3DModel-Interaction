@@ -1,0 +1,14 @@
+.venv/
+node_modules/
+sessions/
+certs/
+__pycache__/
+tmp/
+*.md
+android/.tools/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+android/keys/
+android/dist/

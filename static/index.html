@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ROI · 상품 관찰 실험</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","@sparkjsdev/spark":"/vendor/spark/dist/spark.module.js"}}
+</script>
+<body>
+<header><strong>ROI <span>상품 관찰 실험</span></strong><output id="connection">PC 연결 전</output></header>
+<main>
+  <section id="setup" class="card">
+    <h1>관찰 준비</h1>
+    <p>상품을 살펴보고 안내된 타겟을 찾아주세요.</p>
+    <div class="fields">
+      <label>참가자 ID <input id="participant" value="P001" maxlength="40" required></label>
+      <label>과제 <input id="task" value="신발에서 지정된 글씨나 얼룩을 찾아주세요." maxlength="300"></label>
+      <label>상품 파일 <input id="modelFile" type="file" accept=".ply"></label>
+      <label>최소 타겟 폭 (화면 px) <input id="targetSize" type="number" min="10" max="1000" value="120"></label>
+    </div>
+    <details><summary>촬영 설정</summary><div class="fields">
+      <label>전송 영상 폭 <select id="videoWidth"><option>640</option><option selected>960</option><option>1280</option></select></label>
+      <label>영상 방향 보정 <select id="rotation"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+      <label><input id="mirror" type="checkbox"> 추론 영상 좌우 반전</label>
+      <label>눈 감김 추정 기준 (눈 세로/가로) <input id="eyeThreshold" type="number" min="0" max="0.5" step="0.01" value="0.12"></label>
+      <label>자세·거리·카메라 위치 메모 <input id="geometry" placeholder="가로 거치, 약 50cm, 카메라 위쪽 중앙" maxlength="300"></label>
+    </div></details>
+    <label class="check"><input id="consent" type="checkbox"> 전면 카메라 영상을 연구용 PC로 전송하고 시선·조작 로그를 저장하는 데 동의합니다. 원본 영상은 저장하지 않습니다.</label>
+    <label class="check"><input id="diagnostic" type="checkbox"> 시선 측정 없이 뷰어·기하 매핑만 점검 (연구 데이터로 사용하지 않음)</label>
+    <div class="actions"><button id="prepare">세션 준비</button><button id="restoreButton" class="secondary">저장한 JSON 열기</button><input id="restoreFile" type="file" accept=".json" hidden></div>
+  </section>
+  <section id="workspace" class="card">
+    <div class="toolbar"><div><h2 id="phaseLabel">상품 미리보기</h2><p id="instruction">PLY 파일을 선택하세요. 한 손가락 회전 · 두 손가락 줌/이동</p></div><div><button id="reset" class="secondary">상품에 맞춤</button> <button id="fullView" class="secondary">전체 데이터 보기</button></div></div>
+    <div id="viewer"><div id="empty">3DGS 상품을 불러오면 여기에 표시됩니다.</div></div>
+    <div class="actions">
+      <button id="calibrate" disabled>시선 보정·검증</button><button id="start" disabled>관찰 시작</button>
+      <button id="found" disabled>타겟 발견</button><button id="finish" disabled>관찰 종료</button>
+      <button id="resume" class="secondary" disabled>일시 중지 해제</button>
+      <button id="cameraRestart" class="secondary" hidden>카메라 다시 준비</button>
+      <button id="export" class="secondary" disabled>JSON 내보내기</button>
+      <button id="leaveApp" class="secondary" hidden>PC 연결 설정</button>
+      <button id="newSession" class="secondary" hidden>새 참가자</button>
+    </div>
+    <label id="diagnosticOverride" hidden><input id="acceptLowQuality" type="checkbox"> 검증 기준 미달을 확인했습니다. 진단용으로 진행합니다.</label>
+    <div id="responseRow" hidden><label>발견한 글씨 또는 위치 설명 <input id="answer" maxlength="300"></label></div>
+    <p id="status" role="status" aria-live="polite">준비 중</p>
+    <div id="results" hidden>
+      <h2>관찰 결과</h2><pre id="summary"></pre>
+      <div class="actions"><button id="map">응시점 매핑</button><button id="probe" class="secondary">클릭으로 기하 매핑 점검</button><button id="toggle" class="secondary">점 숨기기</button><button id="toggleOrder" class="secondary" aria-pressed="true">순서 숨기기</button><button id="toggleDirection" class="secondary" aria-pressed="false">관찰 방향 표시</button><button id="delete" class="secondary">PC 세션 삭제</button></div>
+      <p>청록색 원: 추정 응시점 · 주황색 십자: 기하 점검점. 가림이 확인되지 않은 점은 그리지 않습니다.</p>
+      <p>번호는 관찰 시선 프레임의 시간순입니다. 매핑 실패·가림·최대 120개 표시 제한으로 일부 번호는 보이지 않을 수 있습니다.</p>
+      <p>파란 화살표: 당시 뷰어 카메라 쪽에서 응시점으로 향하는 방향(실제 눈의 3D 방향 아님). 화살표가 점과 겹치면 모델을 회전해 확인하세요.</p>
+    </div>
+  </section>
+</main>
+<div id="calibrationOverlay" hidden><p id="calibrationText">점을 바라봐 주세요. 누를 필요 없습니다.</p><div id="target"></div><button id="cancelCalibration">중단</button></div>
+<video id="video" autoplay playsinline muted hidden></video>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

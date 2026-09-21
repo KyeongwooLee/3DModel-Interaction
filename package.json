@@ -1,0 +1,8 @@
+{
+  "name": "roi-tablet-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": { "check": "node check.mjs" },
+  "dependencies": { "@sparkjsdev/spark": "2.2.0", "three": "0.180.0" },
+  "devDependencies": { "playwright": "1.58.2" }
+}
