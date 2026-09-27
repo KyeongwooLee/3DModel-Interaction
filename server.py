@@ -36,6 +36,11 @@ def check_frame(packet):
         raise ValueError('Invalid frame ID')
     if not finite([packet.get('t')], 1) or packet['t'] < 0:
         raise ValueError('Invalid frame time')
+    for key in ('frame_presented_t','video_media_time_ms','view_stable_ms'):
+        if packet.get(key) is not None and (not finite([packet[key]],1) or packet[key] < 0):
+            raise ValueError(f'Invalid {key}')
+    if packet.get('presented_frames') is not None and (not isinstance(packet['presented_frames'],int) or packet['presented_frames'] < 0):
+        raise ValueError('Invalid presented_frames')
     if not finite(packet.get('viewport'), 2) or not all(1 <= n <= 10000 for n in packet['viewport']):
         raise ValueError('Invalid viewport')
     if packet.get('phase') not in ('calibration', 'validation', 'validation_post', 'observing', 'response'):
@@ -169,7 +174,8 @@ async def websocket(request):
                         result = session.events[key]
                     else:
                         values = await worker(app, session.tracker.process, jpeg, data)
-                        result = {k:data[k] for k in ('frame_id','t','phase','view','viewport','target','target_id','time_source') if k in data}
+                        result = {k:data[k] for k in ('frame_id','t','phase','view','viewport','target','target_id','time_source',
+                                  'frame_presented_t','video_media_time_ms','presented_frames','view_stable_ms') if k in data}
                         result.update(values)
                         result.update(id=key, type='gaze')
                         session.append([result])

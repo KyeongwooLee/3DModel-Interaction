@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {SparkRenderer, SplatMesh} from '@sparkjsdev/spark';
-import {plyInfo, focusBounds, normalizedPoint, validationSummary, mappedDisplayPoints, observationArrowTail, shuffled} from './core.js';
+import {plyInfo, focusBounds, normalizedPoint, validationSummary, localSpread, mappedDisplayPoints, observationArrowTail, shuffled} from './core.js';
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
@@ -40,7 +40,7 @@ let model=null, modelInfo=null, initialPosition=null, initialTarget=null, lastVi
 let session=null, metadata=null, phase='setup', priorPhase=null, events=[], seq=0, startTime=0;
 let ws=null, online=false, trackerReady=false, stopped=false, readOnly=false;
 let requestId=0, pending=new Map(), unsaved=[], flushing=false, frameBusy=false, frameId=0;
-let validation=null, target=null, targetId=null, sampleAfter=0, calibrationCancelled=false;
+let validation=null, postValidation=null, target=null, targetId=null, sampleAfter=0, calibrationCancelled=false;
 let videoStream=null, lastSend=0, cameraRunning=false, totalFrames=0, droppedFrames=0;
 let cameraGeneration=0, cameraPreparing=false, calibrationBusy=false, calibrationViewport=null, exporting=false, exportedCount=0;
 let points=[], showPoints=true, showOrder=true, showDirection=false, probeArmed=false, visibilityIndex=0, viewChangedAt=0;
@@ -158,17 +158,17 @@ for(const name of ['pointerdown','pointermove','pointerup','pointercancel']) {
 }
 renderer.domElement.addEventListener('wheel',e=>{if(phase==='observing')log('wheel',{delta:[e.deltaX,e.deltaY],mode:e.deltaMode});},{passive:true});
 
-function cast(x,y,view) {
+function cast(x,y,view,opacity=.2) {
   const ndc=normalizedPoint(x,y,view.rect);if(!ndc || !model)return null;
   const c=new THREE.PerspectiveCamera();c.matrixWorld.fromArray(view.camera);
   c.projectionMatrix.fromArray(view.projection);c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
   const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2(...ndc),c);
-  const saved=model.matrixWorld.clone();model.matrixWorld.fromArray(view.model);
+  const saved=model.matrixWorld.clone(),savedOpacity=model.minRaycastOpacity;model.matrixWorld.fromArray(view.model);model.minRaycastOpacity=opacity;
   try {
     const all=[];model.raycast(ray,all);
     const hits=all.filter(h=>h.distance>=(view.near??.01)&&h.distance<=(view.far??100));hits.sort((a,b)=>a.distance-b.distance);
     return hits.length ? hits[0].point.clone().applyMatrix4(new THREE.Matrix4().fromArray(view.model).invert()).toArray() : null;
-  } finally {model.matrixWorld.copy(saved);}
+  } finally {model.matrixWorld.copy(saved);model.minRaycastOpacity=savedOpacity;}
 }
 function projected(p,clipToViewport=true) {
   const world=new THREE.Vector3(...p.local).applyMatrix4(model.matrixWorld);
@@ -218,9 +218,9 @@ renderer.setAnimationLoop(()=>{
 
 async function loadModel(file) {
   if(!file)return;
-  if(file.size>300*1024*1024)throw Error('초기 버전의 파일 한도는 300MB입니다.');
   if(session&&!stopped)throw Error('진행 중인 세션의 모델을 바꿀 수 없습니다.');
-  $('prepare').disabled=true;status('PLY 확인 중…');
+  if(file.size>300*1024*1024)throw Error('PLY 파일 한도는 300MB입니다.');
+  $('prepare').disabled=true;status('태블릿에서 PLY를 읽는 중…');
   const info=plyInfo(new Uint8Array(await file.slice(0,16384).arrayBuffer()),file.size);
   const bytes=new Uint8Array(await file.arrayBuffer());
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(v=>v.toString(16).padStart(2,'0')).join('');
@@ -241,9 +241,14 @@ async function loadModel(file) {
   modelInfo={name:file.name,sha256:hash,bytes:file.size,splats:info.count,local_diagonal:fullBox.getSize(new THREE.Vector3()).length(),
     focus_diagonal:size.length(),framing:'sampled 5–95% center bounds; no splats removed',
     initial_matrix:model.matrixWorld.toArray(),units:'original PLY units',mapping:'Spark 2.2.0 raycast',min_opacity:.2};
-  points=[];$('empty').hidden=true;status(`상품 준비 완료 · ${info.count.toLocaleString()} 스플랫`);$('prepare').disabled=false;
+  points=[];$('empty').hidden=true;status(`상품 준비 완료 · ${file.name} · ${info.count.toLocaleString()} 스플랫`);$('prepare').disabled=false;
 }
-$('modelFile').onchange=()=>loadModel($('modelFile').files[0]).catch(error=>{status(error.message);$('prepare').disabled=false;});
+$('modelFile').onchange=async()=>{
+  const input=$('modelFile'),file=input.files[0];input.value='';if(!file)return;
+  input.disabled=true;
+  try{await loadModel(file);}catch(error){status(error.message);$('prepare').disabled=!model;}
+  finally{input.disabled=false;}
+};
 $('reset').onclick=()=>{if(initialPosition){camera.position.copy(initialPosition);controls.target.copy(initialTarget);controls.update();log('reset_view',{view:snapshot()});}};
 $('fullView').onclick=()=>{
   if(!model)return;const box=model.getBoundingBox().applyMatrix4(model.matrixWorld);
@@ -335,7 +340,7 @@ async function prepareCamera() {
 
 async function prepare() {
   if(!available())throw Error('앱의 가로 전체 화면과 PC 연결 준비를 확인하세요.');
-  if(!model)throw Error('상품 PLY를 먼저 선택하세요.');
+  if(!model)throw Error('태블릿에서 상품 PLY를 먼저 업로드하세요.');
   if(!token)throw Error('서버가 출력한 #토큰이 포함된 주소로 접속하세요.');
   if(!$('participant').value.trim())throw Error('참가자 ID를 입력하세요.');
   if(!Number.isFinite(Number($('targetSize').value))||Number($('targetSize').value)<10||Number($('targetSize').value)>1000)throw Error('최소 타겟 폭은 10~1000px 범위로 입력하세요.');
@@ -349,9 +354,9 @@ async function prepare() {
     video_width:Number($('videoWidth').value),rotation:Number($('rotation').value),mirror:$('mirror').checked,
     eye_closure_threshold:Number($('eyeThreshold').value),
     geometry_note:$('geometry').value,target_min_width_px:Number($('targetSize').value),
-    timestamps:'tablet performance.now relative to session; frame canvas read time, NOT sensor exposure time',
+    timestamps:'tablet performance.now relative to session; requestVideoFrameCallback presentation time when available, NOT sensor exposure time',
     matrix_layout:'Three.js column-major, model local → world; camera matrixWorld',
-    inference_hz_target:10,jpeg_quality:.85,raw_video_saved:false};
+    inference_hz_target:10,jpeg_quality:.85,raw_video_saved:false,view_stable_threshold_ms:250};
   events=[{id:'metadata',type:'metadata',t:0,data:metadata}];await backup(events);
   for(const input of $('setup').querySelectorAll('input,select,button'))input.disabled=true;
   $('setup').hidden=true;window.scrollTo(0,0);
@@ -367,7 +372,7 @@ $('prepare').onclick=()=>prepare().catch(error=>{status(error.message);buttons()
 const frameCanvas=document.createElement('canvas');const frameContext=frameCanvas.getContext('2d');
 function captureLoop(generation) {
   const video=$('video');
-  const tick=()=>{
+  const tick=(callbackNow,videoFrame)=>{
     if(!cameraRunning||generation!==cameraGeneration)return;
     if(video.requestVideoFrameCallback)video.requestVideoFrameCallback(tick);else setTimeout(tick,100);
     if(!['calibration','validation','validation_post','observing'].includes(phase)||!online||!trackerReady||!available())return;
@@ -380,9 +385,13 @@ function captureLoop(generation) {
     frameCanvas.width=swap?height:width;frameCanvas.height=swap?width:height;
     frameContext.save();frameContext.translate(frameCanvas.width/2,frameCanvas.height/2);
     if(metadata.mirror)frameContext.scale(-1,1);frameContext.rotate(metadata.rotation*Math.PI/180);
-    const t=elapsed();frameContext.drawImage(video,-width/2,-height/2,width,height);frameContext.restore();
+    const displayTime=videoFrame?.expectedDisplayTime??callbackNow??performance.now();
+    const t=displayTime-startTime;frameContext.drawImage(video,-width/2,-height/2,width,height);frameContext.restore();
     const packet={frame_id:++frameId,t,phase,view:structuredClone(lastView),viewport:viewport(),
-      target:target?.slice()||null,target_id:targetId,time_source:'canvas_read_time (sensor latency unknown)'};
+      target:target?.slice()||null,target_id:targetId,
+      frame_presented_t:t,video_media_time_ms:Number.isFinite(videoFrame?.mediaTime)?videoFrame.mediaTime*1000:null,
+      presented_frames:videoFrame?.presentedFrames??null,view_stable_ms:Math.max(0,displayTime-viewChangedAt),
+      time_source:videoFrame?'requestVideoFrameCallback expectedDisplayTime (sensor exposure latency unknown)':'canvas read time (sensor latency unknown)'};
     frameCanvas.toBlob(async blob=>{
       try{
         if(!blob)throw Error('카메라 프레임 인코딩 실패');
@@ -413,8 +422,13 @@ async function showTargets(mode,positions) {
     $('calibrationText').textContent=`${mode==='calibration'?'보정':'독립 검증'} ${i+1}/${positions.length} · 점을 바라봐 주세요. 누르지 않아도 됩니다.`;
     log('target_show',{target:target.slice(),target_id:targetId});
     sampleAfter=performance.now()+700;
-    const until=performance.now()+2500;
-    while(performance.now()<until){if(calibrationCancelled||!available()||!cameraRunning)throw Error('보정/검증이 중단되었습니다.');await sleep(50);}
+    const required=mode==='calibration'?12:5,until=performance.now()+(mode==='calibration'?5000:3500);
+    while(performance.now()<until){
+      if(calibrationCancelled||!available()||!cameraRunning)throw Error('보정/검증이 중단되었습니다.');
+      const count=events.slice(start).filter(e=>e.type==='gaze'&&e.target_id===targetId&&e.raw).length;
+      $('calibrationText').textContent=`${mode==='calibration'?'보정':'독립 검증'} ${i+1}/${positions.length} · 안정 샘플 ${Math.min(count,required)}/${required}`;
+      if(count>=required)break;await sleep(50);
+    }
     target=null;await drainFrames();
   }
   return events.slice(start).filter(e=>e.type==='gaze'&&e.phase===mode);
@@ -431,7 +445,7 @@ $('calibrate').onclick=async()=>{
   try{
     if(calibrationBusy||!cameraRunning||!available())throw Error('카메라와 화면 상태를 확인하세요.');
     calibrationBusy=true;
-    calibrationCancelled=false;validation=null;$('acceptLowQuality').checked=false;
+    calibrationCancelled=false;validation=null;postValidation=null;$('acceptLowQuality').checked=false;
     await drainFrames();await rpc('reset_calibration');
     await showTargets('calibration',[.1,.5,.9].flatMap(y=>[.1,.5,.9].map(x=>[x,y])));
     phase='fitting';const fit=await rpc('fit');log('calibration_fit',{data:fit});
@@ -456,7 +470,7 @@ $('finish').onclick=async()=>{
     if(trackerReady&&validation&&online&&cameraRunning&&previous!=='paused'){
       const deadline=performance.now()+2500;while(!available()&&performance.now()<deadline)await sleep(50);
       if(!available()||calibrationViewport!==viewportKey)throw Error('종료 검증 화면이 보정 때와 달라 검증을 완료하지 못했습니다.');
-      calibrationCancelled=false;const post=await validate(true);status(`종료 검증 90백분위 ${post.p90_px?.toFixed(1)??'없음'}px`);
+      calibrationCancelled=false;postValidation=await validate(true);status(`종료 검증 90백분위 ${postValidation.p90_px?.toFixed(1)??'없음'}px`);
     } else if(!metadata.diagnostic)log('post_validation_skipped',{reason:'camera_calibration_or_connection_unavailable'});
   }catch(error){log('incomplete',{reason:error.message});status(error.message);}
   finally{
@@ -473,10 +487,12 @@ $('finish').onclick=async()=>{
 function showSummary() {
   const gaze=events.filter(e=>e.type==='gaze'&&e.phase==='observing');
   const mapped=events.filter(e=>e.type==='mapping');
+  const gazeMapped=mapped.filter(e=>e.source_type==='gaze');
   const lines=[`세션 ${session}`,`시선 샘플 ${gaze.length} · 유효 ${gaze.filter(e=>e.valid).length}`,
     `모델 매핑 ${mapped.filter(e=>e.hit).length}/${mapped.length} · 화면 표시 최대 120개`,
+    gazeMapped.length?`정지 뷰 매핑 ${gazeMapped.filter(e=>e.time_quality==='stable').length}/${gazeMapped.length}`:null,
     `PC 미저장 이벤트 ${unsaved.length}`,metadata?.diagnostic?'기하 점검 전용 · 시선 연구 데이터 아님':'카메라 기반 추정치 · 절대적인 Ground Truth가 아님'];
-  $('summary').textContent=lines.join('\n');
+  $('summary').textContent=lines.filter(Boolean).join('\n');
 }
 function refreshPoints() {
   points=mappedDisplayPoints(events);
@@ -489,9 +505,16 @@ $('map').onclick=async()=>{
   try{
     const known=new Set(events.filter(e=>e.type==='mapping').map(e=>e.source_id));
     const gaze=events.filter(e=>e.type==='gaze'&&e.phase==='observing'&&!known.has(e.id));
+    const uncertaintyPx=Math.max(validation?.p90_px||0,postValidation?.p90_px||0);
     for(let i=0;i<gaze.length;i++){
       const e=gaze[i];const local=e.valid&&e.xy?cast(...e.xy,e.view):null;
-      const row={source_id:e.id,source_type:'gaze',hit:!!local,local,reason:local?null:(!e.valid?'invalid_gaze':'outside_or_no_intersection'),method:'Spark raycast, opacity >= 0.2'};
+      // ponytail: sample uncertainty every tenth gaze; Spark raycast scans all splats synchronously.
+      const uncertaintySampled=!!local&&!!uncertaintyPx&&i%10===0;
+      const neighbors=uncertaintySampled?[[-1,0],[1,0],[0,-1],[0,1]].map(([dx,dy])=>cast(e.xy[0]+dx*uncertaintyPx,e.xy[1]+dy*uncertaintyPx,e.view)):[];
+      const row={source_id:e.id,source_type:'gaze',hit:!!local,local,reason:local?null:(!e.valid?'invalid_gaze':'outside_or_no_intersection'),
+        method:'Spark raycast, opacity >= 0.2',time_quality:Number.isFinite(e.view_stable_ms)?(e.view_stable_ms>=250?'stable':'view_in_motion'):'unknown',
+        uncertainty_sampled:uncertaintySampled,uncertainty_px:uncertaintySampled?uncertaintyPx:null,uncertainty_hits:uncertaintySampled?neighbors.filter(Boolean).length:null,
+        uncertainty_local_max:localSpread(local,neighbors)};
       if(readOnly)events.push({id:`map:${e.id}`,type:'mapping',t:e.t,...row});else log('mapping',row,e.t);
       if(i%10===0)status(`매핑 ${i+1}/${gaze.length}`);await sleep(0);
     }
@@ -504,7 +527,10 @@ renderer.domElement.addEventListener('click',e=>{
   const view=snapshot(),local=cast(e.clientX,e.clientY,view),id=`probe:${crypto.randomUUID()}`;
   const p={id,type:'probe',t:elapsed(),xy:[e.clientX,e.clientY],view};
   if(readOnly)events.push(p);else{events.push(p);unsaved.push(p);}
-  const row={source_id:id,source_type:'probe',hit:!!local,local,method:'Spark raycast, opacity >= 0.2'};
+  const opacityHits=local?[cast(e.clientX,e.clientY,view,.1),cast(e.clientX,e.clientY,view,.4)]:[];
+  const row={source_id:id,source_type:'probe',hit:!!local,local,method:'Spark raycast, opacity >= 0.2',
+    opacity_thresholds:[.1,.2,.4],opacity_hits:opacityHits.filter(Boolean).length+(local?1:0),
+    opacity_sensitivity_local_max:localSpread(local,opacityHits)};
   if(readOnly)events.push({id:`map:${id}`,type:'mapping',t:p.t,...row});else log('mapping',row);
   refreshPoints();status(local?'기하 점검점을 표시했습니다.':'상품과 교차하지 않는 위치입니다.');
 });
@@ -569,6 +595,8 @@ $('restoreFile').onchange=async()=>{
     }
     stopped=true;stopCamera();ws?.close();clearTimeout(reconnectTimer);readOnly=true;
     session=saved.session_id;metadata=meta;events=saved.events;exportedCount=events.length;unsaved=[];phase='results';
+    validation=events.find(e=>e.type==='validation_summary')?.data||null;
+    postValidation=events.find(e=>e.type==='post_validation')?.data||null;
     model.matrix.fromArray(meta.model.initial_matrix);model.matrix.decompose(model.position,model.quaternion,model.scale);model.updateMatrixWorld(true);
     $('results').hidden=false;$('prepare').disabled=true;$('setup').hidden=true;$('instruction').textContent=metadata.task;window.scrollTo(0,0);refreshPoints();buttons();status('저장한 세션을 불러왔습니다.');
   }catch(error){status(error.message);}
@@ -586,4 +614,4 @@ window.addEventListener('beforeunload',e=>{if(session&&(!stopped||unsaved.length
 window.addEventListener('error',e=>status(`오류: ${e.message}`));
 window.addEventListener('unhandledrejection',e=>status(`오류: ${e.reason?.message||e.reason}`));
 if(host)nativeCall('hello').then(info=>window.roiNativeEvent(info)).catch(error=>status(error.message));
-status('신발 PLY를 선택하고 측정 조건을 확인하세요.');buttons();resize();
+status('태블릿에서 상품 PLY를 업로드하고 측정 조건을 확인하세요.');buttons();resize();

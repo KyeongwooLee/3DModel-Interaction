@@ -62,6 +62,13 @@ export function validationSummary(samples, minTargetPx) {
     passed:errors.length >= 15 && validRatio >= .8 && p90 <= minTargetPx/2};
 }
 
+export function localSpread(center, neighbors) {
+  if (!Array.isArray(center) || center.length!==3 || !center.every(Number.isFinite)) return null;
+  const distances=(neighbors||[]).filter(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))
+    .map(p=>Math.hypot(p[0]-center[0],p[1]-center[1],p[2]-center[2]));
+  return distances.length ? Math.max(...distances) : null;
+}
+
 export function mappedDisplayPoints(events) {
   // Number observation frames before filtering hits or thinning the display.
   const order = new Map(events.filter(e=>e.type==='gaze'&&e.phase==='observing')

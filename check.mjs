@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {Matrix4,Vector3,PerspectiveCamera} from 'three';
-import {plyInfo, focusBounds, normalizedPoint, validationSummary, mappedDisplayPoints, observationArrowTail} from './static/core.js';
+import {plyInfo, focusBounds, normalizedPoint, validationSummary, localSpread, mappedDisplayPoints, observationArrowTail} from './static/core.js';
 
 const orderedFrames=[3,1,2].flatMap(n=>[
   {id:`g${n}`,type:'gaze',phase:'observing',t:n*10,frame_id:n},
@@ -43,7 +43,9 @@ assert.deepEqual(normalizedPoint(150,100,[50,50,200,100]),[0,0]);
 assert.equal(normalizedPoint(49,100,[50,50,200,100]),null);
 assert.equal(validationSummary([],120).passed,false);
 assert.equal(validationSummary(Array.from({length:20},()=>({valid:true,xy:[12,10],target:[10,10]})),120).p90_px,2);
-const modelPath=path.resolve('데이터/신발.ply');
+assert.equal(localSpread([0,0,0],[[3,4,0],null]),5);
+assert.equal(localSpread(null,[[0,0,0]]),null);
+const modelPath=path.resolve('data/신발.ply');
 const file=await fs.open(modelPath);const buffer=Buffer.alloc(16384);await file.read(buffer,0,buffer.length,0);
 const size=(await file.stat()).size;await file.close();
 assert.equal(plyInfo(buffer,size).count,310629);
@@ -103,7 +105,9 @@ if(process.argv.includes('--browser')){
     }
     const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.log('PAGE ERROR:',e.message);});
     page.on('console',message=>{if(message.type()==='error')console.log('BROWSER:',message.text());});
-    await page.goto(url);await page.locator('#modelFile').setInputFiles(modelPath);
+    await page.goto(url);
+    await page.waitForFunction(()=>[...document.querySelector('#modelSelect').options].some(option=>option.value==='신발.ply'));
+    await page.locator('#modelSelect').selectOption('신발.ply');
     try {await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('상품 준비 완료'),{},{timeout:45000});}
     catch(error){console.log('STATUS:',await page.locator('#status').textContent());await fs.mkdir('tmp',{recursive:true});await page.screenshot({path:'tmp/browser-error.png',fullPage:true});throw error;}
     await page.locator('#diagnostic').check();
@@ -156,7 +160,8 @@ if(process.argv.includes('--browser')){
     assert(Math.hypot(screen[0]-source.xy[0],screen[1]-source.xy[1])<1,'Local hit does not reproject to source pixel');
     await page.screenshot({path:'tmp/browser-initial.png',fullPage:true});
     await page.reload();
-    await page.locator('#modelFile').setInputFiles(modelPath);
+    await page.waitForFunction(()=>[...document.querySelector('#modelSelect').options].some(option=>option.value==='신발.ply'));
+    await page.locator('#modelSelect').selectOption('신발.ply');
     await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('상품 준비 완료'),{},{timeout:45000});
     const damaged=structuredClone(payload);damaged.events.find(e=>e.type==='metadata').data.model.initial_matrix=[1,2];
     await page.locator('#restoreFile').setInputFiles({name:'damaged.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(damaged))});
@@ -208,7 +213,9 @@ if(process.argv.includes('--browser')){
     assert.deepEqual(errors,[]);
     console.log('PASS: real shoe PLY render, session/export, geometry probe; screenshot tmp/browser-result.png');
     if(process.argv.includes('--camera')){
-      await page.reload();await page.locator('#modelFile').setInputFiles(modelPath);
+      await page.reload();
+      await page.waitForFunction(()=>[...document.querySelector('#modelSelect').options].some(option=>option.value==='신발.ply'));
+      await page.locator('#modelSelect').selectOption('신발.ply');
       await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('상품 준비 완료'),{},{timeout:45000});
       await page.locator('#consent').check();await page.locator('#prepare').click();
       await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('카메라 준비 완료'),{},{timeout:30000});

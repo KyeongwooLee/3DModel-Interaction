@@ -8,6 +8,89 @@ import time
 import shutil
 import tempfile
 
+
+class TunedSVRCalibration:
+    """Small participant calibration selected by target-held-out validation."""
+    CANDIDATES = [
+        ('linear', .1, 0.), ('linear', 1., 0.),
+        ('rbf', .1, .0005), ('rbf', 1., .0005), ('rbf', 10., .0005),
+        ('rbf', .1, .005), ('rbf', 1., .005), ('rbf', 10., .005),
+        ('rbf', 1., .05),
+    ]
+
+    def __init__(self):
+        self.has_calibrated = False
+
+    @staticmethod
+    def _model(kind, c, gamma):
+        import cv2
+        model = cv2.ml.SVM.create()
+        model.setType(cv2.ml.SVM_EPS_SVR)
+        model.setKernel(cv2.ml.SVM_LINEAR if kind == 'linear' else cv2.ml.SVM_RBF)
+        model.setC(c); model.setP(.001)
+        if kind == 'rbf': model.setGamma(gamma)
+        model.setTermCriteria((cv2.TERM_CRITERIA_MAX_ITER, 10000, 1e-4))
+        return model
+
+    @classmethod
+    def _train(cls, x, y, params):
+        import cv2
+        models=[]
+        for axis in range(2):
+            model=cls._model(*params)
+            if not model.train(x, cv2.ml.ROW_SAMPLE, y[:,axis:axis+1]):
+                raise ValueError('SVR training failed')
+            models.append(model)
+        return models
+
+    @staticmethod
+    def _normalize(x, mean=None, scale=None):
+        import numpy as np
+        x=np.asarray(x, dtype=np.float32)
+        if mean is None:
+            mean=x.mean(axis=0);scale=x.std(axis=0);scale[scale < 1e-6]=1
+        return ((x-mean)/scale).astype(np.float32),mean,scale
+
+    @staticmethod
+    def _predict(models, x):
+        import numpy as np
+        return np.column_stack([model.predict(x)[1].ravel() for model in models])
+
+    def calibrate(self, features, labels, ids):
+        import numpy as np
+        features=np.asarray(features, dtype=np.float32);labels=np.asarray(labels, dtype=np.float32);ids=np.asarray(ids)
+        best=None
+        for params in self.CANDIDATES:
+            prediction=np.empty_like(labels);failed=False
+            for held in np.unique(ids):
+                train=ids != held
+                try:
+                    x,mean,scale=self._normalize(features[train])
+                    models=self._train(x,labels[train],params)
+                    test,_,_=self._normalize(features[~train],mean,scale)
+                    prediction[~train]=self._predict(models,test)
+                except Exception:
+                    failed=True;break
+            if failed:continue
+            errors=np.linalg.norm(prediction-labels,axis=1)
+            score=(float(np.percentile(errors,90)),float(np.median(errors)))
+            if best is None or score < best[0]:best=(score,params)
+        if best is None:return False,float('inf'),None
+        x,self.mean,self.scale=self._normalize(features)
+        self.models=self._train(x,labels,best[1]);self.has_calibrated=True
+        prediction=self._predict(self.models,x)
+        error=float(np.mean(np.linalg.norm(prediction-labels,axis=1)))
+        self.report={'method':'target-held-out tuned SVR','kernel':best[1][0],'C':best[1][1],
+                     'gamma':best[1][2] or None,'cv_p90_normalized':best[0][0],
+                     'cv_median_normalized':best[0][1]}
+        return True,error,prediction
+
+    def predict(self, features, estimated_coordinate):
+        import numpy as np
+        if not self.has_calibrated:return False,estimated_coordinate
+        x,_,_=self._normalize(np.asarray(features).reshape(1,-1),self.mean,self.scale)
+        return True,self._predict(self.models,x)[0]
+
 ROOT = Path(__file__).resolve().parent
 os.environ.setdefault('MPLCONFIGDIR', str(ROOT / 'tmp' / 'matplotlib'))
 os.environ.setdefault('PYGAME_HIDE_SUPPORT_PROMPT', '1')
@@ -47,16 +130,14 @@ class Tracker:
         self.eye_closure_threshold = eye_closure_threshold
         self.info = {'name': 'GazeFollower', 'version': version('gazefollower'),
                      'model_sha256': hashlib.sha256(self.estimator.model_path.read_bytes()).hexdigest(),
-                     'calibration': 'GazeFollower SVR, normalized tablet viewport labels',
+                     'calibration': 'target-held-out tuned SVR, standardized GazeFollower features, normalized tablet viewport labels',
                      'smoothing': False, 'raw_units': 'model output (not screen pixels)',
                      'license': 'CC-BY-NC-SA-4.0', 'input_color': 'RGB',
                      'eye_closure_threshold':eye_closure_threshold}
 
     def reset(self):
-        from gazefollower.calibration import SVRCalibration
-        # Unique session path; never load another participant's calibration.
-        self.calibration = SVRCalibration(model_save_path=str(self.directory))
-        self.calibration.has_calibrated = False
+        # In-memory only: never load another participant's calibration.
+        self.calibration = TunedSVRCalibration()
         self.samples = []
         self.collecting = True
         self.generation = getattr(self, 'generation', 0) + 1
@@ -105,8 +186,8 @@ class Tracker:
     def fit(self):
         import numpy as np
         counts = Counter(row[2] for row in self.samples)
-        if len(counts) < 9 or min(counts.values()) < 5:
-            raise ValueError('9개 보정점마다 유효 샘플이 5개 이상 필요합니다. 자세·조명을 확인하고 재시도하세요.')
+        if len(counts) < 9 or min(counts.values()) < 10:
+            raise ValueError('9개 보정점마다 유효 샘플이 10개 이상 필요합니다. 자세·조명을 확인하고 재시도하세요.')
         features, labels, ids = zip(*self.samples)
         ok, error, _ = self.calibration.calibrate(np.asarray(features), np.asarray(labels), np.asarray(ids))
         if not ok:
@@ -114,7 +195,7 @@ class Tracker:
         self.collecting = False
         self.samples.clear()
         return {'calibration_id': self.generation, 'counts': dict(counts),
-                'training_error_normalized': float(error), 'frozen': True}
+                'training_error_normalized': float(error), **self.calibration.report, 'frozen': True}
 
     def close(self):
         self.face.face_mesh.close()

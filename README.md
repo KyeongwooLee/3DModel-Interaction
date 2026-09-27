@@ -48,7 +48,7 @@ https://localhost:9443/#TOKEN
 https://192.168.0.5:9443/#TOKEN
 ```
 
-서버를 종료하려면 PowerShell에서 `Ctrl+C`를 누릅니다.
+서버를 종료하려면 터미널에서 `Ctrl+C`를 누릅니다.
 
 ### 태블릿에서 사용할 주소
 
@@ -136,7 +136,7 @@ android/dist/ROIViewer.apk.sha256
 1. PC에서 `start.ps1` 실행
 2. 태블릿에서 최신 HTTPS URL 접속
 3. 참가자 ID 입력
-4. 사용할 `.ply` 파일 선택
+4. `상품 모델 PLY 업로드`에서 태블릿에 저장된 사용할 `.ply` 파일 선택 (300MB 이하)
 5. `진단용 실행` 옵션은 **해제**
 6. 연구 동의 확인
 7. `세션 준비` 선택
@@ -234,6 +234,9 @@ observation_end
 - `face_detected`가 대부분 `true`인가
 - `quality_tick.submitted_frames`가 0보다 큰가
 - `mapping.hit` 비율이 충분한가
+- `calibration_fit.cv_p90_normalized`와 독립 `validation_summary.p90_px`가 함께 기록되는가
+- `mapping.time_quality = stable`인 표본이 충분한가
+- `uncertainty_sampled: true`인 매핑에서 `uncertainty_local_max`가 타겟 부위보다 작고, 수동 점검의 `opacity_sensitivity_local_max`가 안정적인가
 
 대표적인 실패 원인:
 
@@ -266,6 +269,8 @@ npm.cmd run check -- --browser --camera --native
 
 자동 검증은 기능 동작 확인을 위한 것입니다. 실제 Galaxy Tab 참가자 실험의 시선 정확도, 지연시간, 조작 중 추적 품질을 대신하지 않습니다.
 
+시선 개선판은 같은 참가자·거치 거리·조명에서 3회 이상 반복해 `validation_summary`와 `post_validation`의 p90을 기존 실기기 범위(183~208px, 종료 최대 252px)와 비교하세요. 통과 기준은 기본값 60px이며, 기준 미달 세션은 진단용으로만 사용합니다. 매핑 평가는 먼저 화면의 알려진 지점을 누르는 기하 점검으로 광선·행렬 경로를 확인하고, 이후 고정된 3D 타겟을 응시하는 과제로 시선 오차를 포함한 전체 경로를 확인합니다.
+
 ## 문제 해결
 
 ### 태블릿에서 연결되지 않음
@@ -295,7 +300,7 @@ npm.cmd run check -- --browser --camera --native
 
 - 실험에 사용한 것과 동일한 `.ply` 파일인지 확인
 - 세션 복원 시 모델 SHA-256이 일치해야 함
-- 3DGS 바이너리 PLY의 파일 크기와 태블릿 저장 공간 확인
+- 태블릿에서 실험에 사용한 동일한 `.ply` 파일을 다시 업로드
 
 ## 데이터 및 보안
 

@@ -17,7 +17,7 @@
     <div class="fields">
       <label>참가자 ID <input id="participant" value="P001" maxlength="40" required></label>
       <label>과제 <input id="task" value="신발에서 지정된 글씨나 얼룩을 찾아주세요." maxlength="300"></label>
-      <label>상품 파일 <input id="modelFile" type="file" accept=".ply"></label>
+      <label>상품 모델 PLY 업로드 <input id="modelFile" type="file" accept=".ply"></label>
       <label>최소 타겟 폭 (화면 px) <input id="targetSize" type="number" min="10" max="1000" value="120"></label>
     </div>
     <details><summary>촬영 설정</summary><div class="fields">
@@ -32,7 +32,7 @@
     <div class="actions"><button id="prepare">세션 준비</button><button id="restoreButton" class="secondary">저장한 JSON 열기</button><input id="restoreFile" type="file" accept=".json" hidden></div>
   </section>
   <section id="workspace" class="card">
-    <div class="toolbar"><div><h2 id="phaseLabel">상품 미리보기</h2><p id="instruction">PLY 파일을 선택하세요. 한 손가락 회전 · 두 손가락 줌/이동</p></div><div><button id="reset" class="secondary">상품에 맞춤</button> <button id="fullView" class="secondary">전체 데이터 보기</button></div></div>
+    <div class="toolbar"><div><h2 id="phaseLabel">상품 미리보기</h2><p id="instruction">태블릿에서 PLY 파일을 업로드하세요. 한 손가락 회전 · 두 손가락 줌/이동</p></div><div><button id="reset" class="secondary">상품에 맞춤</button> <button id="fullView" class="secondary">전체 데이터 보기</button></div></div>
     <div id="viewer"><div id="empty">3DGS 상품을 불러오면 여기에 표시됩니다.</div></div>
     <div class="actions">
       <button id="calibrate" disabled>시선 보정·검증</button><button id="start" disabled>관찰 시작</button>

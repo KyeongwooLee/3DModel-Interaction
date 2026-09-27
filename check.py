@@ -32,10 +32,22 @@ async def check():
         try:
             check_frame({**frame,'viewport':[float('nan'),800]});raise AssertionError('NaN accepted')
         except ValueError:pass
+        try:
+            check_frame({**frame,'view_stable_ms':-1});raise AssertionError('Negative timing accepted')
+        except ValueError:pass
         if '--tracker' in sys.argv:
             import numpy as np
-            from gaze import Tracker
+            from gaze import Tracker, TunedSVRCalibration
             from gazefollower.misc import FaceInfo
+            # Calibration must generalize to a target that was not used to fit each fold.
+            rng=np.random.default_rng(7);features=[];labels=[];groups=[]
+            for group,(x,y) in enumerate([(x,y) for y in (.1,.5,.9) for x in (.1,.5,.9)]):
+                for _ in range(12):
+                    features.append([x,y,x*y,x*x,y*y,1]+rng.normal(0,.01,6));labels.append([x,y]);groups.append(group)
+            calibration=TunedSVRCalibration();ok,_,_=calibration.calibrate(np.asarray(features),np.asarray(labels),groups)
+            assert ok and np.isfinite(calibration.report['cv_p90_normalized'])
+            ok,prediction=calibration.predict(features[0],[0,0])
+            assert ok and np.linalg.norm(prediction-labels[0])<.1
             t=Tracker(directory/'tracker')
             result=t.process(buffer.getvalue(),frame)
             assert result['xy'] is None and not result['valid'], 'Blank image produced gaze'
